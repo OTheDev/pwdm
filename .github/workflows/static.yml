@@ -1,0 +1,52 @@
+name: Static Analysis
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'Cargo.toml'
+      - '.github/workflows/static.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'Cargo.toml'
+      - '.github/workflows/static.yml'
+
+jobs:
+  lint-and-audit:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Rust Environment
+      run: |
+        # Install rustup
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        . "$HOME/.cargo/env"
+        # Install Clippy and rustfmt
+        rustup component add clippy rustfmt
+        # Install cargo-audit
+        cargo install cargo-audit
+
+    - name: Print versions
+      run: |
+        rustup --version
+        rustc --version
+        cargo --version
+        cargo clippy --version
+        cargo fmt --version
+        cargo audit --version
+
+    - name: Run clippy (lint)
+      run: cargo clippy -- -D warnings
+
+    - name: Check Code Formatting with rustfmt
+      run: cargo fmt -- --check
+
+    - name: Security Audit with cargo-audit
+      run: cargo audit

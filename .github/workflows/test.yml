@@ -1,0 +1,53 @@
+name: Multi-platform Test
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'Cargo.toml'
+      - '.github/workflows/test.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'Cargo.toml'
+      - '.github/workflows/test.yml'
+
+jobs:
+  build-and-test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      run: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      shell: bash
+
+    - id: versions
+      name: Print versions
+      run: |
+        rustup --version
+        rustc --version
+        cargo --version
+      shell: bash
+
+    - name: Build release
+      run: cargo build --release
+      shell: bash
+
+    - name: Run tests
+      run: cargo test --release
+      shell: bash
+
+    - name: Test installation
+      run: |
+        cargo install --path .
+      shell: bash
