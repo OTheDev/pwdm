@@ -49,11 +49,11 @@ fn main() -> Result<()> {
   )?;
 
   match PwdManager::new(path, &master_password) {
-    Ok(pwd_manager) => loop {
+    Ok(mut pwd_manager) => loop {
       clear_screen()?;
 
       let selection = select_action()?;
-      match match_action(selection, &pwdgen, &pwd_manager)? {
+      match match_action(selection, &pwdgen, &mut pwd_manager)? {
         UserAction::Back => continue,
         UserAction::Continue => {}
         UserAction::ContinueWithMessage(msg) => println!("{}", msg),
@@ -83,6 +83,7 @@ enum Action {
   Delete,
   Update,
   List,
+  UpdateMaster,
   Exit,
 }
 
@@ -97,6 +98,7 @@ impl core::fmt::Display for Action {
         Action::Delete => "Delete",
         Action::Update => "Update",
         Action::List => "List",
+        Action::UpdateMaster => "Update Master Password",
         Action::Exit => "Exit",
       }
     )
@@ -110,6 +112,7 @@ fn select_action() -> Result<Action> {
     Action::Delete,
     Action::Update,
     Action::List,
+    Action::UpdateMaster,
     Action::Exit,
   ];
   let selection = Select::with_theme(&ColorfulTheme::default())
@@ -123,7 +126,7 @@ fn select_action() -> Result<Action> {
 fn match_action(
   selection: Action,
   pwdgen: &PwdGen,
-  pwd_manager: &PwdManager,
+  pwd_manager: &mut PwdManager,
 ) -> Result<UserAction<String>> {
   match selection {
     Action::Add => add_password(pwd_manager, pwdgen),
@@ -134,15 +137,26 @@ fn match_action(
       list_passwords(pwd_manager)?;
       Ok(UserAction::Continue)
     }
+    Action::UpdateMaster => update_master_password(pwd_manager),
     Action::Exit => Ok(UserAction::Exit),
   }
 }
 
-fn do_action<F>(prompt: &str, action: F) -> Result<UserAction<String>>
+fn do_action<F>(
+  prompt: &str,
+  mut action: F,
+  is_password: bool,
+) -> Result<UserAction<String>>
 where
-  F: Fn(&str) -> Result<()>,
+  F: FnMut(&str) -> Result<()>,
 {
-  match input_with_back_option(prompt, "b")? {
+  let result = if is_password {
+    password_with_back_option(prompt, "b")?
+  } else {
+    input_with_back_option(prompt, "b")?
+  };
+
+  match result {
     UserAction::Back => Ok(UserAction::Back),
     UserAction::ContinueWithMessage(msg) => {
       action(&msg)?;
@@ -156,61 +170,77 @@ fn add_password(
   pwd_manager: &PwdManager,
   pwdgen: &PwdGen,
 ) -> Result<UserAction<String>> {
-  do_action("Enter ID", |id| {
-    if pwd_manager.get_password(id)?.is_none() {
-      let password: String = generate_password(pwdgen, "Enter password")?;
-      pwd_manager.add_password(id, &password)?;
-      println!("Password added.");
-    } else {
-      println!("Password exists.");
-    }
-    Ok(())
-  })
+  do_action(
+    "Enter ID",
+    |id| {
+      if pwd_manager.get_password(id)?.is_none() {
+        let password: String = generate_password(pwdgen, "Enter password")?;
+        pwd_manager.add_password(id, &password)?;
+        println!("Password added.");
+      } else {
+        println!("Password exists.");
+      }
+      Ok(())
+    },
+    false,
+  )
 }
 
 fn get_password(pwd_manager: &PwdManager) -> Result<UserAction<String>> {
-  do_action("Enter ID", |id| {
-    match pwd_manager.get_password(id)? {
-      Some(password) => println!("Password: {}", password),
-      None => println!("No password found for ID: {}", id),
-    }
-    Ok(())
-  })
+  do_action(
+    "Enter ID",
+    |id| {
+      match pwd_manager.get_password(id)? {
+        Some(password) => println!("Password: {}", password),
+        None => println!("No password found for ID: {}", id),
+      }
+      Ok(())
+    },
+    false,
+  )
 }
 
 fn delete_password(pwd_manager: &PwdManager) -> Result<UserAction<String>> {
-  do_action("Enter ID", |id| {
-    if pwd_manager.get_password(id)?.is_none() {
-      println!("No password found for ID: {}", id);
-    } else if Confirm::new()
-      .with_prompt(format!(
-        "Are you sure you want to delete password for ID {}",
-        id
-      ))
-      .interact()?
-    {
-      pwd_manager.delete_password(id)?;
-      println!("Password deleted.");
-    }
-    Ok(())
-  })
+  do_action(
+    "Enter ID",
+    |id| {
+      if pwd_manager.get_password(id)?.is_none() {
+        println!("No password found for ID: {}", id);
+      } else if Confirm::new()
+        .with_prompt(format!(
+          "Are you sure you want to delete password for ID {}",
+          id
+        ))
+        .interact()?
+      {
+        pwd_manager.delete_password(id)?;
+        println!("Password deleted.");
+      }
+      Ok(())
+    },
+    false,
+  )
 }
 
 fn update_password(
   pwd_manager: &PwdManager,
   pwdgen: &PwdGen,
 ) -> Result<UserAction<String>> {
-  do_action("Enter ID", |id| {
-    if pwd_manager.get_password(id)?.is_none() {
-      println!("No password found for ID: {}", id);
-    } else {
-      let new_password: String =
-        generate_password(pwdgen, "Enter new password")?;
-      pwd_manager.update_password(id, &new_password)?;
-      println!("Password updated.");
-    }
-    Ok(())
-  })
+  do_action(
+    "Enter ID",
+    |id| {
+      if pwd_manager.get_password(id)?.is_none() {
+        println!("No password found for ID: {}", id);
+      } else {
+        let new_password: String =
+          generate_password(pwdgen, "Enter new password")?;
+        pwd_manager.update_password(id, &new_password)?;
+        println!("Password updated.");
+      }
+      Ok(())
+    },
+    false,
+  )
 }
 
 fn list_passwords(pwd_manager: &PwdManager) -> Result<()> {
@@ -224,6 +254,20 @@ fn list_passwords(pwd_manager: &PwdManager) -> Result<()> {
     }
   }
   Ok(())
+}
+
+fn update_master_password(
+  pwd_manager: &mut PwdManager,
+) -> Result<UserAction<String>> {
+  do_action(
+    "Enter new master password",
+    |new_master_password| {
+      pwd_manager.update_master_password(new_master_password)?;
+      println!("Master password updated.");
+      Ok(())
+    },
+    true,
+  )
 }
 
 fn generate_password(pwdgen: &PwdGen, prompt: &str) -> Result<String> {
@@ -252,11 +296,49 @@ fn input_with_back_option(
     ))
     .interact_text()?;
 
-  if input.to_lowercase() == back_keyword {
+  if input == back_keyword {
     Ok(UserAction::Back)
   } else {
     Ok(UserAction::ContinueWithMessage(input))
   }
+}
+
+fn password_with_back_option(
+  prompt: &str,
+  back_keyword: &str,
+) -> Result<UserAction<String>> {
+  let mut input: String;
+  let mut confirm: String;
+
+  loop {
+    input = Password::new()
+      .with_prompt(format!("{} ('{}' to go back)", prompt, back_keyword))
+      .interact()?;
+    if input == back_keyword {
+      return Ok(UserAction::Back);
+    }
+
+    confirm = Password::new()
+      .with_prompt(format!("Repeat password ('{}' to go back)", back_keyword))
+      .interact()?;
+    if confirm == back_keyword {
+      return Ok(UserAction::Back);
+    }
+
+    if input != confirm {
+      println!("Error: the passwords don't match. Please try again.\n");
+    } else {
+      if Confirm::new()
+        .with_prompt("Are you sure you want to change the master password?")
+        .interact()?
+      {
+        break;
+      }
+      return Ok(UserAction::Back);
+    }
+  }
+
+  Ok(UserAction::ContinueWithMessage(input))
 }
 
 fn determine_path(args: Args) -> Result<PathBuf> {
