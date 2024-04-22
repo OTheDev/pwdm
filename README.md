@@ -49,6 +49,7 @@ interactive commands can be used:
  - `Delete`: Remove a password entry.
  - `Update`: Update an existing password.
  - `List`: List all password IDs.
+ - `Update Master Password`: Update the master password.
  - `Exit`: Exit the program.
 
 In `Add` or `Update`, either input a password manually or choose to
