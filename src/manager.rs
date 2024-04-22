@@ -214,6 +214,66 @@ impl PwdManager {
       Ok(None)
     }
   }
+
+  /// Update the master password associated with the database.
+  pub fn update_master_password(
+    &mut self,
+    new_master_password: &str,
+  ) -> Result<()> {
+    let argon2 = Argon2::default();
+
+    let auth_salt = SaltString::generate(&mut OsRng);
+    let master_hash = argon2
+      .hash_password(new_master_password.as_ref(), &auth_salt)?
+      .to_string();
+
+    let master_salt = SaltString::generate(&mut OsRng);
+    let cipher =
+      Cipher::from_password(new_master_password.as_bytes(), &master_salt)?;
+
+    let tx = self.conn.transaction()?;
+
+    tx.execute(
+      "UPDATE metadata SET value = ?1 WHERE name = 'master_salt'",
+      params![master_salt.as_ref()],
+    )?;
+
+    tx.execute(
+      "UPDATE metadata SET value = ?1 WHERE name = 'master_hash'",
+      params![&master_hash],
+    )?;
+
+    {
+      let mut stmt =
+        tx.prepare("SELECT id, ciphertext, nonce FROM passwords")?;
+
+      let rows = stmt.query_map([], |row| {
+        let id: String = row.get(0)?;
+        let ciphertext: Vec<u8> = row.get(1)?;
+        let nonce: Vec<u8> = row.get(2)?;
+        Ok((id, ciphertext, nonce))
+      })?;
+
+      for row in rows {
+        let (id, ciphertext, nonce) = row?;
+
+        let decrypted_plaintext = self.cipher.decrypt(&ciphertext, &nonce)?;
+        let (new_ciphertext, new_nonce) =
+          cipher.encrypt(std::str::from_utf8(&decrypted_plaintext)?)?;
+
+        tx.execute(
+          "UPDATE passwords SET ciphertext = ?1, nonce = ?2 WHERE id = ?3",
+          params![&new_ciphertext[..], &new_nonce[..], id],
+        )?;
+      }
+    }
+
+    tx.commit()?;
+
+    self.cipher = cipher;
+
+    Ok(())
+  }
 }
 
 struct Cipher(Aes256Gcm);

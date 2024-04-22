@@ -229,3 +229,38 @@ fn test_cipher_decrypt_on_invalid_encryption() {
 
   cipher.decrypt(&ciphertext[..], &nonce).unwrap();
 }
+
+#[test]
+fn test_update_master_password() {
+  let (mut manager, _temp_file) = setup_db();
+  manager.add_password("test_id", "test_password").unwrap();
+
+  let new_master_password = "new_master_password";
+  manager.update_master_password(new_master_password).unwrap();
+
+  // Verify that old master password is invalidated
+  assert!(PwdManager::new(
+    _temp_file.path().to_str().unwrap(),
+    "master_password"
+  )
+  .is_err());
+
+  // Verify that new master password is valid
+  assert!(PwdManager::new(
+    _temp_file.path().to_str().unwrap(),
+    new_master_password
+  )
+  .is_ok());
+
+  // Verify encryption/decryption
+  assert_eq!(
+    manager.get_password("test_id").unwrap(),
+    Some("test_password".to_string())
+  );
+
+  manager.add_password("new_id", "new_password").unwrap();
+  assert_eq!(
+    manager.get_password("new_id").unwrap(),
+    Some("new_password".to_string())
+  );
+}

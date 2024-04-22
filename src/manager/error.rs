@@ -30,8 +30,8 @@ pub enum Error {
   #[error("SQLite error: {0}")]
   Sqlite(#[from] rusqlite::Error),
 
-  #[error("UTF-8 Decoding error: {0}")]
-  Utf8Decoding(#[from] std::string::FromUtf8Error),
+  #[error("{0}")]
+  Utf8Decoding(#[from] Utf8DecodingError),
 }
 
 impl From<aes_gcm::aead::Error> for Error {
@@ -50,4 +50,25 @@ impl From<argon2::password_hash::Error> for Error {
   fn from(err: argon2::password_hash::Error) -> Self {
     Self::Argon2PasswordHash(err)
   }
+}
+
+impl From<core::str::Utf8Error> for Error {
+  fn from(err: core::str::Utf8Error) -> Self {
+    Self::Utf8Decoding(Utf8DecodingError::StrUtf8(err))
+  }
+}
+
+impl From<std::string::FromUtf8Error> for Error {
+  fn from(err: std::string::FromUtf8Error) -> Self {
+    Self::Utf8Decoding(Utf8DecodingError::Utf8(err))
+  }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Utf8DecodingError {
+  #[error("UTF-8 Decoding error (String): {0}")]
+  Utf8(#[from] std::string::FromUtf8Error),
+
+  #[error("UTF-8 Decoding error (str): {0}")]
+  StrUtf8(#[from] core::str::Utf8Error),
 }
