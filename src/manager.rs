@@ -139,12 +139,20 @@ impl PwdManager {
 
     let (ciphertext, nonce) = self.cipher.encrypt(password)?;
 
-    self.conn.execute(
+    match self.conn.execute(
       "INSERT INTO passwords (id, ciphertext, nonce) VALUES (?1, ?2, ?3)",
       params![id, &ciphertext[..], &nonce[..]],
-    )?;
-
-    Ok(())
+    ) {
+      Ok(_) => Ok(()),
+      Err(err) => match err {
+        rusqlite::Error::SqliteFailure(error, _)
+          if error.code == rusqlite::ErrorCode::ConstraintViolation =>
+        {
+          Err(Error::DuplicateId(id.to_string()))
+        }
+        _ => Err(Error::Sqlite(err)),
+      },
+    }
   }
 
   /// Removes a password by its ID from the database.
