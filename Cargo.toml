@@ -20,6 +20,7 @@ dirs = "5.0"
 pwdg = "0.1"
 rusqlite = { version = "0.31", features = ["bundled"] }
 thiserror = "1.0"
+zxcvbn = "2.2"
 
 [dev-dependencies]
 tempfile = "3.10"

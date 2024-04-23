@@ -5,10 +5,12 @@ SPDX-License-Identifier: Apache-2.0
 use super::*;
 use tempfile::NamedTempFile;
 
+const STRONG_PASSWORD: &'static str = "^%master_p(ssword)";
+
 fn setup_db() -> (PwdManager, NamedTempFile) {
   let temp_file = NamedTempFile::new().unwrap();
   let db_path = temp_file.path().to_str().unwrap();
-  let manager = PwdManager::new(db_path, "master_password").unwrap();
+  let manager = PwdManager::new(db_path, STRONG_PASSWORD).unwrap();
   (manager, temp_file)
 }
 
@@ -131,7 +133,7 @@ fn test_existing_database_with_master_salt() {
     .expect("Failed to retrieve salt");
 
   let manager_1 =
-    PwdManager::new(temp_file.path().to_str().unwrap(), "master_password")
+    PwdManager::new(temp_file.path().to_str().unwrap(), STRONG_PASSWORD)
       .unwrap();
   let retrieved_salt_1: String = manager_1
     .conn
@@ -267,4 +269,43 @@ fn test_update_master_password() {
     manager.get_password("new_id").unwrap(),
     Some("new_password".to_string())
   );
+}
+
+const WEAK_PASSWORDS: &[&str] = &[
+  "12345678",
+  "password",
+  "password123",
+  "p@ssword",
+  "p@ssword1",
+];
+
+#[test]
+fn test_initial_weak_password() {
+  let temp_file = NamedTempFile::new().unwrap();
+  let db_path = temp_file.path().to_str().unwrap();
+
+  for &password in WEAK_PASSWORDS.iter() {
+    let result = PwdManager::new(db_path, password);
+    match result {
+      Err(Error::WeakPassword(_)) => {}
+      _ => {
+        panic!("Should return Error::WeakPassword.");
+      }
+    }
+  }
+}
+
+#[test]
+fn test_update_to_weak_password() {
+  let (mut manager, _temp_file) = setup_db();
+
+  for &password in WEAK_PASSWORDS.iter() {
+    let result = manager.update_master_password(password);
+    match result {
+      Err(Error::WeakPassword(_)) => {}
+      _ => {
+        panic!("Should return Error::WeakPassword.");
+      }
+    }
+  }
 }

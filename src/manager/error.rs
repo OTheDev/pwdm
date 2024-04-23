@@ -35,6 +35,12 @@ pub enum Error {
 
   #[error("{0}")]
   Utf8Decoding(#[from] Utf8DecodingError),
+
+  #[error("Weak password")]
+  WeakPassword(Option<zxcvbn::feedback::Feedback>),
+
+  #[error("zxcvbn error: {0}")]
+  Zxcvbn(#[from] zxcvbn::ZxcvbnError),
 }
 
 impl From<aes_gcm::aead::Error> for Error {

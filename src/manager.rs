@@ -18,6 +18,7 @@ use argon2::{
 };
 use error::{Error, Result};
 use rusqlite::{params, Connection};
+use zxcvbn::zxcvbn;
 
 /// Password manager struct.
 pub struct PwdManager {
@@ -106,6 +107,8 @@ impl PwdManager {
     ) {
       Ok(hash) => hash,
       Err(rusqlite::Error::QueryReturnedNoRows) => {
+        Self::check_password_strength(master_password)?;
+
         let auth_salt = SaltString::generate(&mut OsRng);
 
         let master_hash = argon2
@@ -228,6 +231,8 @@ impl PwdManager {
     &mut self,
     new_master_password: &str,
   ) -> Result<()> {
+    Self::check_password_strength(new_master_password)?;
+
     let argon2 = Argon2::default();
 
     let auth_salt = SaltString::generate(&mut OsRng);
@@ -280,6 +285,14 @@ impl PwdManager {
 
     self.cipher = cipher;
 
+    Ok(())
+  }
+
+  fn check_password_strength(password: &str) -> Result<()> {
+    let entropy = zxcvbn(password, &[])?;
+    if entropy.score() < 4 {
+      return Err(Error::WeakPassword(entropy.feedback().clone()));
+    }
     Ok(())
   }
 }
