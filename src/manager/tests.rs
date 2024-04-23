@@ -95,8 +95,12 @@ fn test_special_character_password() {
 #[test]
 fn test_duplicate_password_addition() {
   let (manager, _temp_file) = setup_db();
-  manager.add_password("duplicate_id", "password").unwrap();
-  assert!(manager.add_password("duplicate_id", "password").is_err());
+  let duplicate_id = "duplicate_id";
+  manager.add_password(duplicate_id, "password").unwrap();
+  match manager.add_password(duplicate_id, "password") {
+    Err(Error::DuplicateId(id)) => assert_eq!(duplicate_id, id),
+    _ => panic!("Expected DuplicateId error"),
+  }
 }
 
 #[test]

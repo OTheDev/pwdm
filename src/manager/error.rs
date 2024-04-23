@@ -18,6 +18,9 @@ pub enum Error {
   #[error("Argon2PasswordHash error: {0}")]
   Argon2PasswordHash(argon2::password_hash::Error),
 
+  #[error("Duplicate id '{0}': A password with this id already exists")]
+  DuplicateId(String),
+
   #[error("The password provided is empty")]
   EmptyPassword,
 
