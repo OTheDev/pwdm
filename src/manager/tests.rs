@@ -309,3 +309,25 @@ fn test_update_to_weak_password() {
     }
   }
 }
+
+#[test]
+fn test_atomicity_of_new() {
+  let temp_file = NamedTempFile::new().unwrap();
+  let db_path = temp_file.path().to_str().unwrap();
+  let res = PwdManager::new(db_path, "weakpassword");
+
+  assert!(res.is_err());
+
+  let conn = Connection::open(db_path).unwrap();
+  let metadata_exists: u8 = conn
+    .query_row(
+      "SELECT COUNT(*) FROM sqlite_master
+       WHERE type = 'table' AND name = 'metadata'",
+      [],
+      |row| row.get(0),
+    )
+    .unwrap();
+
+  // 'metadata' table should not exist because new() should have rolled back
+  assert_eq!(metadata_exists, 0);
+}
