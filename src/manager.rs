@@ -17,7 +17,7 @@ use argon2::{
   Argon2,
 };
 use error::{Error, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, Transaction};
 use zxcvbn::zxcvbn;
 
 /// Password manager struct.
@@ -33,21 +33,25 @@ impl PwdManager {
   /// authenticates the master password, retrieves or generates the master
   /// salt, and prepares the cipher.
   pub fn new(db_path: &str, master_password: &str) -> Result<Self> {
-    let conn = Self::establish_connection(db_path)?;
+    let mut conn = Connection::open(db_path)?;
 
-    Self::verify_master_password(&conn, master_password)?;
+    // Wrap all mutating db operations inside a transaction for atomicity
+    let tx = conn.transaction()?;
 
-    let master_salt = Self::get_or_generate_salt(&conn, "master_salt")?;
+    Self::init_db(&tx)?;
+    Self::verify_master_password(&tx, master_password)?;
+    let master_salt = Self::get_or_generate_salt(&tx, "master_salt")?;
+
     let cipher =
       Cipher::from_password(master_password.as_bytes(), &master_salt)?;
+
+    tx.commit()?;
 
     Ok(Self { conn, cipher })
   }
 
-  fn establish_connection(db_path: &str) -> Result<Connection> {
-    let conn = Connection::open(db_path)?;
-
-    conn.execute(
+  fn init_db(tx: &Transaction) -> Result<()> {
+    tx.execute(
       "CREATE TABLE IF NOT EXISTS metadata (
         name TEXT PRIMARY KEY,
         value BLOB
@@ -55,7 +59,7 @@ impl PwdManager {
       [],
     )?;
 
-    conn.execute(
+    tx.execute(
       "CREATE TABLE IF NOT EXISTS passwords (
         id TEXT PRIMARY KEY,
         ciphertext BLOB NOT NULL CHECK(length(ciphertext) > 0),
@@ -65,14 +69,14 @@ impl PwdManager {
       [],
     )?;
 
-    Ok(conn)
+    Ok(())
   }
 
   fn get_or_generate_salt(
-    conn: &Connection,
+    tx: &Transaction,
     salt_name: &str,
   ) -> Result<SaltString> {
-    let out_salt: String = match conn.query_row(
+    let out_salt: String = match tx.query_row(
       "SELECT value FROM metadata WHERE name = ?1",
       rusqlite::params![salt_name],
       |row| row.get(0),
@@ -81,7 +85,7 @@ impl PwdManager {
       Err(rusqlite::Error::QueryReturnedNoRows) => {
         let salt = SaltString::generate(&mut OsRng);
 
-        conn.execute(
+        tx.execute(
           "INSERT INTO metadata (name, value) VALUES (?1, ?2)",
           params![salt_name, salt.as_ref()],
         )?;
@@ -95,12 +99,12 @@ impl PwdManager {
   }
 
   fn verify_master_password(
-    conn: &Connection,
+    tx: &Transaction,
     master_password: &str,
   ) -> Result<()> {
     let argon2 = Argon2::default();
 
-    let master_hash: String = match conn.query_row(
+    let master_hash: String = match tx.query_row(
       "SELECT value FROM metadata WHERE name = 'master_hash'",
       [],
       |row| row.get(0),
@@ -114,7 +118,7 @@ impl PwdManager {
         let master_hash = argon2
           .hash_password(master_password.as_ref(), &auth_salt)?
           .to_string();
-        conn.execute(
+        tx.execute(
           "INSERT INTO metadata (name, value) VALUES ('master_hash', ?1)",
           params![&master_hash],
         )?;
