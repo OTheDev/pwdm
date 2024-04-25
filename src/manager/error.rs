@@ -30,6 +30,9 @@ pub enum Error {
   #[error("No password found for the provided id")]
   PasswordNotFound,
 
+  #[error("pwdm signature not found")]
+  SignatureNotFound,
+
   #[error("SQLite error: {0}")]
   Sqlite(#[from] rusqlite::Error),
 
