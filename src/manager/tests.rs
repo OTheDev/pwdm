@@ -331,3 +331,45 @@ fn test_atomicity_of_new() {
   // 'metadata' table should not exist because new() should have rolled back
   assert_eq!(metadata_exists, 0);
 }
+
+#[test]
+fn test_found_signature() {
+  let (_manager, temp_file) = setup_db();
+  let db_path = temp_file.path().to_str().unwrap();
+
+  assert!(PwdManager::found_signature(db_path));
+}
+
+#[test]
+fn test_signature_not_found() {
+  let temp_file = NamedTempFile::new().unwrap();
+  let db_path = temp_file.path().to_str().unwrap();
+
+  assert!(!PwdManager::found_signature(db_path));
+}
+
+#[test]
+fn test_signature_not_found_incorrect_file_signature() {
+  let (manager, temp_file) = setup_db();
+  let db_path = temp_file.path().to_str().unwrap();
+
+  manager
+    .conn
+    .execute(
+      "UPDATE metadata SET value = ?1 WHERE name = 'signature'",
+      params!["pwdm__2EFBFE29-6B7E-429E-A202-0BD74B183860"],
+    )
+    .unwrap();
+
+  assert!(!PwdManager::found_signature(db_path));
+}
+
+#[test]
+fn test_signature_not_found_no_metadata_table() {
+  let (manager, temp_file) = setup_db();
+  let db_path = temp_file.path().to_str().unwrap();
+
+  manager.conn.execute("DROP TABLE metadata", []).unwrap();
+
+  assert!(!PwdManager::found_signature(db_path));
+}

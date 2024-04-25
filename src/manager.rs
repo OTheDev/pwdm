@@ -4,6 +4,7 @@ SPDX-License-Identifier: Apache-2.0
 */
 pub mod error;
 
+use crate::db;
 use aes_gcm::{
   aead::{generic_array::GenericArray, Aead, AeadCore, KeyInit},
   aes::cipher::typenum,
@@ -17,7 +18,7 @@ use argon2::{
   Argon2,
 };
 use error::{Error, Result};
-use rusqlite::{params, Connection, Transaction};
+use rusqlite::{params, Connection, OpenFlags, Transaction};
 use zxcvbn::zxcvbn;
 
 /// Password manager struct.
@@ -27,6 +28,9 @@ pub struct PwdManager {
 }
 
 impl PwdManager {
+  // NOTE: This hardcoded signature is NOT used for security purposes.
+  const SIGNATURE: &'static str = "pwdm__68DB418B-5E94-4640-BF7D-3340812ACE36";
+
   /// Creates a new `PwdManager`. It opens a new connection to the SQLite
   /// database (creating one if the database does not exist at the path),
   /// initializes it with the necessary tables if they do not already exist,
@@ -34,11 +38,18 @@ impl PwdManager {
   /// salt, and prepares the cipher.
   pub fn new(db_path: &str, master_password: &str) -> Result<Self> {
     let mut conn = Connection::open(db_path)?;
+    let db_empty = db::is_empty(&conn)?;
+    let found_signature = Self::query_signature(&conn);
 
     // Wrap all mutating db operations inside a transaction for atomicity
     let tx = conn.transaction()?;
 
-    Self::init_db(&tx)?;
+    if db_empty {
+      Self::init_db(&tx)?;
+    } else if !found_signature {
+      return Err(Error::SignatureNotFound);
+    }
+
     Self::verify_master_password(&tx, master_password)?;
     let master_salt = Self::get_or_generate_salt(&tx, "master_salt")?;
 
@@ -52,7 +63,7 @@ impl PwdManager {
 
   fn init_db(tx: &Transaction) -> Result<()> {
     tx.execute(
-      "CREATE TABLE IF NOT EXISTS metadata (
+      "CREATE TABLE metadata (
         name TEXT PRIMARY KEY,
         value BLOB
       )",
@@ -60,13 +71,18 @@ impl PwdManager {
     )?;
 
     tx.execute(
-      "CREATE TABLE IF NOT EXISTS passwords (
+      "CREATE TABLE passwords (
         id TEXT PRIMARY KEY,
         ciphertext BLOB NOT NULL CHECK(length(ciphertext) > 0),
         nonce BLOB NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )",
       [],
+    )?;
+
+    tx.execute(
+      "INSERT INTO metadata (name, value) VALUES (?1, ?2)",
+      params!["signature", Self::SIGNATURE],
     )?;
 
     Ok(())
@@ -298,6 +314,37 @@ impl PwdManager {
       return Err(Error::WeakPassword(entropy.feedback().clone()));
     }
     Ok(())
+  }
+
+  fn query_signature(conn: &Connection) -> bool {
+    let sig: String = match conn.query_row(
+      "SELECT value FROM metadata WHERE name = 'signature'",
+      [],
+      |row| row.get(0),
+    ) {
+      Ok(signature) => signature,
+      Err(_) => return false,
+    };
+
+    sig == Self::SIGNATURE
+  }
+
+  /// Return `true` if a database at path `db_path` exists and the `pwdm` 'file
+  /// signature' is stored within it. If any error occurs during the process,
+  /// including if the database does not exist, if the signature is not found,
+  /// or if the database file cannot be read, this function will return `false`.
+  pub fn found_signature(db_path: &str) -> bool {
+    let conn = match Connection::open_with_flags(
+      db_path,
+      // Open the database in read-only mode. If the database does not already
+      // exist, an error is returned.
+      OpenFlags::SQLITE_OPEN_READ_ONLY,
+    ) {
+      Ok(connection) => connection,
+      Err(_) => return false,
+    };
+
+    Self::query_signature(&conn)
   }
 }
 
