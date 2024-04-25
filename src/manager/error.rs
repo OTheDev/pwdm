@@ -30,7 +30,7 @@ pub enum Error {
   #[error("No password found for the provided id")]
   PasswordNotFound,
 
-  #[error("pwdm signature not found in database")]
+  #[error("pwdm signature not found")]
   SignatureNotFound,
 
   #[error("SQLite error: {0}")]
