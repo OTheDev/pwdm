@@ -6,15 +6,23 @@ mod cli;
 
 use clap::Parser;
 use cli::{Error, Result};
-use crossterm::{
-  execute,
-  terminal::{Clear, ClearType},
-};
+use colored::*;
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, Password, Select};
 use pwdg::{PwdGen, PwdGenOptions};
-use pwdm::PwdManager;
-use std::io::stdout;
+use pwdm::{
+  Error::{IncorrectMasterPassword, WeakPassword},
+  PwdManager,
+};
 use std::path::{Path, PathBuf};
+
+const PWDGEN_OPTIONS: Option<PwdGenOptions> = Some(PwdGenOptions {
+  min_upper: 2,
+  min_lower: 2,
+  min_digit: 2,
+  min_special: 2,
+  exclude: None,
+});
+const PWDGEN_LEN: usize = 16;
 
 /// Password Manager CLI
 #[derive(Parser, Debug)]
@@ -32,38 +40,69 @@ fn main() -> Result<()> {
   ensure_path_dir_exists(&db_path)?;
 
   let path = &db_path.to_string_lossy();
-  println!("Database: {}", path);
-  let master_password: String = Password::new()
-    .with_prompt("Enter master password")
-    .interact()?;
 
-  let pwdgen = PwdGen::new(
-    16,
-    Some(PwdGenOptions {
-      min_upper: 2,
-      min_lower: 2,
-      min_digit: 2,
-      min_special: 2,
-      exclude: None,
-    }),
-  )?;
+  let found_signature = PwdManager::found_signature(path);
 
-  match PwdManager::new(path, &master_password) {
-    Ok(mut pwd_manager) => loop {
-      clear_screen()?;
+  let mut pwd_manager: PwdManager;
+  loop {
+    clear_screen()?;
 
-      let selection = select_action()?;
-      match match_action(selection, &pwdgen, &mut pwd_manager)? {
-        UserAction::Back => continue,
-        UserAction::Continue => {}
-        UserAction::ContinueWithMessage(msg) => println!("{}", msg),
-        UserAction::Exit => break,
+    print_header(path);
+    let master_password: String = Password::new()
+      .with_prompt("Enter master password")
+      .interact()?;
+
+    if !found_signature {
+      let confirm: String =
+        Password::new().with_prompt("Repeat password").interact()?;
+      if master_password != confirm {
+        print_if_password_confirmation_fails();
+        press_enter_to_continue();
+        continue;
       }
+    }
+    match PwdManager::new(path, &master_password) {
+      Ok(manager) => {
+        pwd_manager = manager;
+        break;
+      }
+      Err(WeakPassword(feedback)) => {
+        print_if_weak_password(feedback);
+      }
+      Err(IncorrectMasterPassword) => {
+        eprintln!("{}", format!("Error: {}", IncorrectMasterPassword).red());
+        std::process::exit(1);
+      }
+      Err(e) => return Err(Error::Manager(e)),
+    }
 
-      println!("\nPress Enter to continue...");
-      let _ = std::io::stdin().read_line(&mut String::new());
-    },
-    Err(e) => return Err(Error::Manager(e)),
+    press_enter_to_continue();
+  }
+
+  let pwdgen = PwdGen::new(PWDGEN_LEN, PWDGEN_OPTIONS)?;
+
+  let mut last_action: Option<Action> = None;
+  loop {
+    clear_screen()?;
+
+    print_header(path);
+    let selection = match last_action.take() {
+      Some(action) => {
+        print_selected_action(action);
+        action
+      }
+      _ => select_action()?,
+    };
+
+    match match_action(selection, &pwdgen, &mut pwd_manager)? {
+      UserAction::Back => continue,
+      UserAction::Continue => {}
+      UserAction::ContinueWithMessage(msg) => println!("{}", msg),
+      UserAction::Exit => break,
+      UserAction::TryAgain(action) => last_action = Some(action),
+    }
+
+    press_enter_to_continue();
   }
 
   Ok(())
@@ -74,6 +113,7 @@ enum UserAction<T> {
   Continue,
   ContinueWithMessage(T),
   Exit,
+  TryAgain(Action),
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -86,6 +126,16 @@ enum Action {
   UpdateMaster,
   Exit,
 }
+
+const SELECTIONS: &[Action] = &[
+  Action::Add,
+  Action::Get,
+  Action::Delete,
+  Action::Update,
+  Action::List,
+  Action::UpdateMaster,
+  Action::Exit,
+];
 
 impl core::fmt::Display for Action {
   fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
@@ -106,21 +156,12 @@ impl core::fmt::Display for Action {
 }
 
 fn select_action() -> Result<Action> {
-  let selections = &[
-    Action::Add,
-    Action::Get,
-    Action::Delete,
-    Action::Update,
-    Action::List,
-    Action::UpdateMaster,
-    Action::Exit,
-  ];
   let selection = Select::with_theme(&ColorfulTheme::default())
     .with_prompt("Choose action")
     .default(0)
-    .items(&selections[..])
+    .items(SELECTIONS)
     .interact()?;
-  Ok(selections[selection])
+  Ok(SELECTIONS[selection])
 }
 
 fn match_action(
@@ -192,7 +233,7 @@ fn get_password(pwd_manager: &PwdManager) -> Result<UserAction<String>> {
     |id| {
       match pwd_manager.get_password(id)? {
         Some(password) => println!("Password: {}", password),
-        None => println!("No password found for ID: {}", id),
+        None => print_no_password_found_for_id(id),
       }
       Ok(())
     },
@@ -205,7 +246,7 @@ fn delete_password(pwd_manager: &PwdManager) -> Result<UserAction<String>> {
     "Enter ID",
     |id| {
       if pwd_manager.get_password(id)?.is_none() {
-        println!("No password found for ID: {}", id);
+        print_no_password_found_for_id(id);
       } else if Confirm::new()
         .with_prompt(format!(
           "Are you sure you want to delete password for ID {}",
@@ -230,7 +271,7 @@ fn update_password(
     "Enter ID",
     |id| {
       if pwd_manager.get_password(id)?.is_none() {
-        println!("No password found for ID: {}", id);
+        print_no_password_found_for_id(id);
       } else {
         let new_password: String =
           generate_password(pwdgen, "Enter new password")?;
@@ -259,15 +300,19 @@ fn list_passwords(pwd_manager: &PwdManager) -> Result<()> {
 fn update_master_password(
   pwd_manager: &mut PwdManager,
 ) -> Result<UserAction<String>> {
-  do_action(
-    "Enter new master password",
-    |new_master_password| {
-      pwd_manager.update_master_password(new_master_password)?;
-      println!("Master password updated.");
-      Ok(())
-    },
-    true,
-  )
+  let action = |new_master_password: &str| {
+    pwd_manager.update_master_password(new_master_password)?;
+    println!("Master password updated.");
+    Ok::<_, Error>(())
+  };
+
+  match do_action("Enter new master password", action, true) {
+    Err(Error::Manager(WeakPassword(feedback))) => {
+      print_if_weak_password(feedback);
+      Ok(UserAction::TryAgain(Action::UpdateMaster))
+    }
+    other => other,
+  }
 }
 
 fn generate_password(pwdgen: &PwdGen, prompt: &str) -> Result<String> {
@@ -281,8 +326,9 @@ fn generate_password(pwdgen: &PwdGen, prompt: &str) -> Result<String> {
   })
 }
 
-fn clear_screen() -> std::io::Result<()> {
-  execute!(stdout(), Clear(ClearType::All))
+fn clear_screen() -> Result<()> {
+  clearscreen::ClearScreen::Terminfo.clear()?;
+  Ok(())
 }
 
 fn input_with_back_option(
@@ -326,7 +372,7 @@ fn password_with_back_option(
     }
 
     if input != confirm {
-      println!("Error: the passwords don't match. Please try again.\n");
+      print_if_password_confirmation_fails();
     } else {
       if Confirm::new()
         .with_prompt("Are you sure you want to change the master password?")
@@ -365,4 +411,65 @@ fn ensure_path_dir_exists(path: &Path) -> Result<()> {
     }
   }
   Ok(())
+}
+
+fn message_if_weak_password(opt: Option<zxcvbn::feedback::Feedback>) -> String {
+  let mut details: String = String::new();
+
+  if let Some(feedback) = opt {
+    if let Some(warning) = feedback.warning() {
+      details = format!("Warning: {}", warning);
+    }
+
+    let suggestions: Vec<String> = feedback
+      .suggestions()
+      .iter()
+      .map(|s| s.to_string())
+      .collect();
+
+    if !suggestions.is_empty() {
+      let sugg_str = suggestions.join(" ");
+      details.push_str(&format!("\nSuggestions: {}", sugg_str));
+    }
+  }
+
+  details
+}
+
+fn press_enter_to_continue() {
+  println!("\nPress Enter to continue...");
+  let _ = std::io::stdin().read_line(&mut String::new());
+}
+
+fn print_if_weak_password(feedback: Option<zxcvbn::feedback::Feedback>) {
+  println!("\nThe password entered is weak.");
+  println!("{}", message_if_weak_password(feedback));
+}
+
+fn print_header(path: &str) {
+  println!("{}", "pwdm - Password Manager".bright_magenta().bold());
+  println!("{}: {}\n", "Database".green(), path);
+}
+
+fn print_no_password_found_for_id(id: &str) {
+  println!("No password found for ID: {}", id.to_string().cyan())
+}
+
+fn print_if_password_confirmation_fails() {
+  println!(
+    "{}",
+    "Error: the passwords don't match. Please try again.".red()
+  );
+}
+
+// TODO: this should be temporary. It's currently used to emulate the
+// dialoguer output after choosing an option from `Select` so that if a try
+// again path is used, everything looks the same. This approach is not ideal and
+// needs to be investigated.
+fn print_selected_action(action: Action) {
+  println!(
+    "{} Choose action · {}",
+    "✔".green(),
+    action.to_string().green()
+  );
 }
