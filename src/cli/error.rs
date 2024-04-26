@@ -20,4 +20,7 @@ pub enum Error {
 
   #[error("Password generator error: {0}")]
   PwdGen(#[from] pwdg::Error),
+
+  #[error("clearscreen error: {0}")]
+  ClearScreen(#[from] clearscreen::Error),
 }
