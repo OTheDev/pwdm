@@ -61,14 +61,6 @@ automatically generate a secure one.
 cargo install pwdm
 ```
 
-#### From Source
-```shell
-git clone git@github.com:OTheDev/pwdm.git
-cd pwdm
-# Optionally, run `cargo test` to run tests
-cargo install --path .
-```
-
 ## License
 
 `pwdm` is licensed under Apache-2.0.
