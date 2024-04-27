@@ -23,6 +23,14 @@ hash the password to a PHC string appropriate for password-based authentication.
 The hash is stored in the database to authenticate the master password in
 subsequent invocations.
 
+The master password should be *strong*. Consequently, as a precaution, this
+password manager uses [Dropbox's `zxcvbn`](https://github.com/dropbox/zxcvbn)
+password strength estimator whenever the master password is set or updated, and
+enforces that `zxcvbn`'s estimate (an integer in `[0, 4]`) for the given
+password is the maximum possible score of 4, which is documented to indicate
+"strong protection from offline slow-hash scenario(s)". [Try `zxcvbn`
+interactively](https://lowe.github.io/tryzxcvbn/).
+
 ## Command-line
 
 ```console
