@@ -203,6 +203,7 @@ where
       action(&msg)?;
       Ok(UserAction::Continue)
     }
+    UserAction::TryAgain(f) => Ok(UserAction::TryAgain(f)),
     _ => panic!("Unexpected UserAction"),
   }
 }
@@ -219,7 +220,7 @@ fn add_password(
         pwd_manager.add_password(id, &password)?;
         println!("Password added.");
       } else {
-        println!("Password exists.");
+        println!("{}", "Password exists.".red());
       }
       Ok(())
     },
@@ -353,38 +354,32 @@ fn password_with_back_option(
   prompt: &str,
   back_keyword: &str,
 ) -> Result<UserAction<String>> {
-  let mut input: String;
-  let mut confirm: String;
-
-  loop {
-    input = Password::new()
-      .with_prompt(format!("{} ('{}' to go back)", prompt, back_keyword))
-      .interact()?;
-    if input == back_keyword {
-      return Ok(UserAction::Back);
-    }
-
-    confirm = Password::new()
-      .with_prompt(format!("Repeat password ('{}' to go back)", back_keyword))
-      .interact()?;
-    if confirm == back_keyword {
-      return Ok(UserAction::Back);
-    }
-
-    if input != confirm {
-      print_if_password_confirmation_fails();
-    } else {
-      if Confirm::new()
-        .with_prompt("Are you sure you want to change the master password?")
-        .interact()?
-      {
-        break;
-      }
-      return Ok(UserAction::Back);
-    }
+  let input = Password::new()
+    .with_prompt(format!("{} ('{}' to go back)", prompt, back_keyword))
+    .interact()?;
+  if input == back_keyword {
+    return Ok(UserAction::Back);
   }
 
-  Ok(UserAction::ContinueWithMessage(input))
+  let confirm = Password::new()
+    .with_prompt(format!("Repeat password ('{}' to go back)", back_keyword))
+    .interact()?;
+  if confirm == back_keyword {
+    return Ok(UserAction::Back);
+  }
+
+  if input != confirm {
+    print_if_password_confirmation_fails();
+    Ok(UserAction::TryAgain(Action::UpdateMaster))
+  } else {
+    if Confirm::new()
+      .with_prompt("Are you sure you want to change the master password?")
+      .interact()?
+    {
+      return Ok(UserAction::ContinueWithMessage(input));
+    }
+    Ok(UserAction::Back)
+  }
 }
 
 fn determine_path(args: Args) -> Result<PathBuf> {
@@ -442,8 +437,12 @@ fn press_enter_to_continue() {
 }
 
 fn print_if_weak_password(feedback: Option<zxcvbn::feedback::Feedback>) {
-  println!("\nThe password entered is weak.");
-  println!("{}", message_if_weak_password(feedback));
+  println!("{}", "\nThe password entered is weak.".red());
+  let msg = message_if_weak_password(feedback).red();
+  if !msg.is_empty() {
+    println!("{}", msg);
+  }
+  println!("{}", "Please try again.".red());
 }
 
 fn print_header(path: &str) {
@@ -457,7 +456,7 @@ fn print_no_password_found_for_id(id: &str) {
 
 fn print_if_password_confirmation_fails() {
   println!(
-    "{}",
+    "\n{}",
     "Error: the passwords don't match. Please try again.".red()
   );
 }
