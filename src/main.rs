@@ -446,8 +446,22 @@ fn print_if_weak_password(feedback: Option<zxcvbn::feedback::Feedback>) {
 }
 
 fn print_header(path: &str) {
-  println!("{}", "pwdm - Password Manager".bright_magenta().bold());
-  println!("{}: {}\n", "Database".green(), path);
+  println!(
+    "\
+██████╗ ██╗    ██╗██████╗ ███╗   ███╗
+██╔══██╗██║    ██║██╔══██╗████╗ ████║
+██████╔╝██║ █╗ ██║██║  ██║██╔████╔██║
+██╔═══╝ ██║███╗██║██║  ██║██║╚██╔╝██║
+██║     ╚███╔███╔╝██████╔╝██║ ╚═╝ ██║
+╚═╝      ╚══╝╚══╝ ╚═════╝ ╚═╝     ╚═╝
+
+{}
+{}: {}
+",
+    "pwdm - Password Manager".bright_magenta().bold(),
+    "Database".green(),
+    path
+  );
 }
 
 fn print_no_password_found_for_id(id: &str) {
