@@ -75,8 +75,19 @@ impl PwdManager {
         id TEXT PRIMARY KEY,
         ciphertext BLOB NOT NULL CHECK(length(ciphertext) > 0),
         nonce BLOB NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )",
+      [],
+    )?;
+
+    tx.execute(
+      "CREATE TRIGGER update_time
+       AFTER UPDATE ON passwords
+       FOR EACH ROW
+        BEGIN
+          UPDATE passwords SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+        END;",
       [],
     )?;
 
