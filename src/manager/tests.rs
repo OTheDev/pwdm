@@ -373,3 +373,49 @@ fn test_signature_not_found_no_metadata_table() {
 
   assert!(!PwdManager::found_signature(db_path));
 }
+
+#[test]
+fn test_created_at_and_updated_at() {
+  let (manager, _temp_file) = setup_db();
+
+  const QUERY: &str = "
+    SELECT
+      cast(strftime('%s', created_at) as integer),
+      cast(strftime('%s', updated_at) as integer)
+    FROM passwords
+    WHERE id = ?
+  ";
+  let get_times = |id: &str| {
+    manager
+      .conn
+      .query_row(QUERY, rusqlite::params![id], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+      })
+      .unwrap()
+  };
+
+  let id = "test_id";
+  let password = "test_password";
+  manager.add_password(id, password).unwrap();
+
+  // Check timestamps on creation
+  let times_0 = get_times(id);
+  assert_eq!(times_0.0, times_0.1);
+
+  std::thread::sleep(std::time::Duration::from_secs(2));
+
+  // Update the password
+  let new_password = "new_password";
+  manager.update_password(id, new_password).unwrap();
+
+  // Check timestamps on update
+  let times_1 = get_times(id);
+  assert!(
+    times_1.1 > times_1.0,
+    "updated_at should not be earlier than created_at"
+  );
+  assert!(
+    times_0.0 == times_1.0,
+    "created_at should not change after updating"
+  );
+}
