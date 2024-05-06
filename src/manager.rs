@@ -21,6 +21,29 @@ use error::{Error, Result};
 use rusqlite::{params, Connection, OpenFlags, Transaction};
 use zxcvbn::zxcvbn;
 
+#[derive(Clone, Debug)]
+pub struct UserIdentity {
+  pub service: String,
+  pub username: Option<String>,
+}
+
+impl PartialEq for UserIdentity {
+  fn eq(&self, other: &Self) -> bool {
+    self.service == other.service && self.username == other.username
+  }
+}
+
+impl std::fmt::Display for UserIdentity {
+  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    match &self.username {
+      Some(username) => {
+        write!(f, "Service: {}, Username: {}", self.service, username)
+      }
+      None => write!(f, "Service: {}", self.service),
+    }
+  }
+}
+
 /// Password manager struct.
 pub struct PwdManager {
   conn: Connection,
@@ -72,12 +95,24 @@ impl PwdManager {
 
     tx.execute(
       "CREATE TABLE passwords (
-        id TEXT PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        service TEXT NOT NULL,
+        username TEXT,
         ciphertext BLOB NOT NULL CHECK(length(ciphertext) > 0),
         nonce BLOB NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )",
+      [],
+    )?;
+
+    // In SQLite, NULL values are considered different from all other NULL
+    // values, so we use a little trick with ifnull().
+    tx.execute(
+      r#"
+      CREATE UNIQUE INDEX idx_username_service ON passwords
+        (ifnull(username, ''), service);
+      "#,
       [],
     )?;
 
@@ -166,7 +201,7 @@ impl PwdManager {
   }
 
   /// Adds a password to the database.
-  pub fn add_password(&self, id: &str, password: &str) -> Result<()> {
+  pub fn add_password(&self, uid: &UserIdentity, password: &str) -> Result<()> {
     if password.is_empty() {
       return Err(Error::EmptyPassword);
     }
@@ -174,15 +209,23 @@ impl PwdManager {
     let (ciphertext, nonce) = self.cipher.encrypt(password)?;
 
     match self.conn.execute(
-      "INSERT INTO passwords (id, ciphertext, nonce) VALUES (?1, ?2, ?3)",
-      params![id, &ciphertext[..], &nonce[..]],
+      "
+      INSERT INTO passwords (service, username, ciphertext, nonce)
+      VALUES (?1, ?2, ?3, ?4)
+    ",
+      params![
+        &uid.service,
+        uid.username.as_deref(),
+        &ciphertext[..],
+        &nonce[..]
+      ],
     ) {
       Ok(_) => Ok(()),
       Err(err) => match err {
         rusqlite::Error::SqliteFailure(error, _)
           if error.code == rusqlite::ErrorCode::ConstraintViolation =>
         {
-          Err(Error::DuplicateId(id.to_string()))
+          Err(Error::DuplicateId(uid.clone()))
         }
         _ => Err(Error::Sqlite(err)),
       },
@@ -190,10 +233,11 @@ impl PwdManager {
   }
 
   /// Removes a password by its ID from the database.
-  pub fn delete_password(&self, id: &str) -> Result<()> {
-    let changes = self
-      .conn
-      .execute("DELETE FROM passwords WHERE id = ?1", params![id])?;
+  pub fn delete_password(&self, uid: &UserIdentity) -> Result<()> {
+    let changes = self.conn.execute(
+      "DELETE FROM passwords WHERE service = ?1 AND username IS ?2",
+      params![&uid.service, uid.username.as_deref()],
+    )?;
 
     if changes == 0 {
       Err(Error::PasswordNotFound)
@@ -203,47 +247,71 @@ impl PwdManager {
   }
 
   /// Fetches all password IDs sorted in ascending order.
-  pub fn list_passwords(&self) -> Result<Vec<String>> {
-    let mut stmt = self
-      .conn
-      .prepare("SELECT id FROM passwords ORDER BY id ASC")?;
-    let rows = stmt.query_map([], |row| row.get(0))?;
+  pub fn list_passwords(&self) -> Result<Vec<UserIdentity>> {
+    let mut stmt = self.conn.prepare(
+      "SELECT service, username FROM passwords
+       ORDER BY service ASC, username ASC
+      ",
+    )?;
 
-    let mut ids = Vec::new();
-    for id_result in rows {
-      let id: String = id_result?;
-      ids.push(id);
+    let rows = stmt.query_map([], |row| {
+      let service: String = row.get("service")?;
+      let username: Option<String> = row.get("username")?;
+      let uid = UserIdentity { service, username };
+      Ok(uid)
+    })?;
+
+    let mut service_username_pairs = Vec::new();
+    for row_result in rows {
+      let row = row_result?;
+      service_username_pairs.push(row);
     }
 
-    Ok(ids)
+    Ok(service_username_pairs)
   }
 
   /// Updates a password by its ID.
-  pub fn update_password(&self, id: &str, new_password: &str) -> Result<()> {
+  pub fn update_password(
+    &self,
+    uid: &UserIdentity,
+    new_password: &str,
+  ) -> Result<()> {
     if new_password.is_empty() {
       return Err(Error::EmptyPassword);
     }
-    if self.get_password(id)?.is_none() {
+    if self.get_password(uid)?.is_none() {
       return Err(Error::PasswordNotFound);
     }
 
     let (ciphertext, nonce) = self.cipher.encrypt(new_password)?;
 
     self.conn.execute(
-      "UPDATE passwords SET ciphertext = ?1, nonce = ?2 WHERE id = ?3",
-      params![&ciphertext[..], &nonce[..], id],
+      "
+      UPDATE passwords SET ciphertext = ?1, nonce = ?2
+      WHERE service = ?3 AND username IS ?4
+      ",
+      params![
+        &ciphertext[..],
+        &nonce[..],
+        &uid.service,
+        uid.username.as_deref()
+      ],
     )?;
 
     Ok(())
   }
 
   /// Retrieves a password by its ID.
-  pub fn get_password(&self, id: &str) -> Result<Option<String>> {
-    let mut stmt = self
-      .conn
-      .prepare("SELECT ciphertext, nonce FROM passwords WHERE id = ?")?;
+  pub fn get_password(&self, uid: &UserIdentity) -> Result<Option<String>> {
+    let mut stmt = self.conn.prepare(
+      "
+        SELECT ciphertext, nonce FROM passwords
+        WHERE service = ?1 AND username IS ?2
+      ",
+    )?;
 
-    let mut rows = stmt.query(params![id])?;
+    let mut rows =
+      stmt.query(params![&uid.service, uid.username.as_deref()])?;
 
     if let Some(row) = rows.next()? {
       let ciphertext: Vec<u8> = row.get(0)?;
@@ -292,7 +360,7 @@ impl PwdManager {
         tx.prepare("SELECT id, ciphertext, nonce FROM passwords")?;
 
       let rows = stmt.query_map([], |row| {
-        let id: String = row.get(0)?;
+        let id: i64 = row.get(0)?;
         let ciphertext: Vec<u8> = row.get(1)?;
         let nonce: Vec<u8> = row.get(2)?;
         Ok((id, ciphertext, nonce))

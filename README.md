@@ -9,7 +9,7 @@ Rudimentary command-line tool and Rust library for managing passwords.
 ## Password Database
 
 Passwords are encrypted and stored in a SQLite database where each password is
-identified by a unique ID string.
+uniquely identified by a **service** name and an optional **username**.
 
 ## Security
 

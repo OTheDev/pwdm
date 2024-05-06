@@ -7,4 +7,4 @@ mod db;
 mod manager;
 
 pub use manager::error::{Error, Result};
-pub use manager::PwdManager;
+pub use manager::{PwdManager, UserIdentity};
