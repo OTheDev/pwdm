@@ -14,6 +14,20 @@ fn setup_db() -> (PwdManager, NamedTempFile) {
   (manager, temp_file)
 }
 
+fn initial_identity() -> UserIdentity {
+  UserIdentity {
+    service: "test_service".to_string(),
+    username: Some("test_username".to_string()),
+  }
+}
+
+fn nonexistent_identity() -> UserIdentity {
+  UserIdentity {
+    service: "nonexistent_service".to_string(),
+    username: Some("nonexistent_username".to_string()),
+  }
+}
+
 #[test]
 fn test_new_pwd_manager() {
   let (manager, _temp_file) = setup_db();
@@ -23,73 +37,76 @@ fn test_new_pwd_manager() {
 #[test]
 fn test_add_and_get_password() {
   let (manager, _temp_file) = setup_db();
-  manager.add_password("test_id", "test_password").unwrap();
-  let retrieved_password = manager.get_password("test_id").unwrap();
+  let uid = initial_identity();
+
+  manager.add_password(&uid, "test_password").unwrap();
+  let retrieved_password = manager.get_password(&uid).unwrap();
   assert_eq!(retrieved_password, Some("test_password".to_string()));
 }
 
 #[test]
 fn test_update_password() {
   let (manager, _temp_file) = setup_db();
-  manager.add_password("test_id", "test_password").unwrap();
-  manager.update_password("test_id", "new_password").unwrap();
-  let retrieved_password = manager.get_password("test_id").unwrap();
+  let uid = initial_identity();
+
+  manager.add_password(&uid, "test_password").unwrap();
+  manager.update_password(&uid, "new_password").unwrap();
+  let retrieved_password = manager.get_password(&uid).unwrap();
   assert_eq!(retrieved_password, Some("new_password".to_string()));
 }
 
 #[test]
 fn test_delete_password() {
   let (manager, _temp_file) = setup_db();
-  manager.add_password("test_id", "test_password").unwrap();
-  manager.delete_password("test_id").unwrap();
-  let retrieved_password = manager.get_password("test_id").unwrap();
+  let uid = initial_identity();
+
+  manager.add_password(&uid, "test_password").unwrap();
+  manager.delete_password(&uid).unwrap();
+  let retrieved_password = manager.get_password(&uid).unwrap();
   assert!(retrieved_password.is_none());
 }
 
 #[test]
 fn test_get_nonexistent_password() {
   let (manager, _temp_file) = setup_db();
-  assert_eq!(manager.get_password("nonexistent_id").unwrap(), None);
+  assert_eq!(manager.get_password(&nonexistent_identity()).unwrap(), None);
 }
 
 #[test]
 fn test_update_nonexistent_password() {
   let (manager, _temp_file) = setup_db();
   assert!(manager
-    .update_password("nonexistent_id", "new_password")
+    .update_password(&nonexistent_identity(), "new_password")
     .is_err());
 }
 
 #[test]
 fn test_delete_nonexistent_password() {
   let (manager, _temp_file) = setup_db();
-  assert!(manager.delete_password("nonexistent_id").is_err());
+  assert!(manager.delete_password(&nonexistent_identity()).is_err());
 }
 
 #[test]
 fn test_long_password() {
   let (manager, _temp_file) = setup_db();
+  let uid = initial_identity();
+
   let long_password = "p".repeat(1000);
 
-  manager
-    .add_password("long_pass_id", &long_password)
-    .unwrap();
-  assert_eq!(
-    manager.get_password("long_pass_id").unwrap(),
-    Some(long_password)
-  );
+  manager.add_password(&uid, &long_password).unwrap();
+  assert_eq!(manager.get_password(&uid).unwrap(), Some(long_password));
 }
 
 #[test]
 fn test_special_character_password() {
   let (manager, _temp_file) = setup_db();
+  let uid = initial_identity();
+
   let special_password = "p@ssw0rd!$";
 
-  manager
-    .add_password("special_char_id", special_password)
-    .unwrap();
+  manager.add_password(&uid, special_password).unwrap();
   assert_eq!(
-    manager.get_password("special_char_id").unwrap(),
+    manager.get_password(&uid).unwrap(),
     Some(special_password.to_string())
   );
 }
@@ -97,10 +114,11 @@ fn test_special_character_password() {
 #[test]
 fn test_duplicate_password_addition() {
   let (manager, _temp_file) = setup_db();
-  let duplicate_id = "duplicate_id";
-  manager.add_password(duplicate_id, "password").unwrap();
-  match manager.add_password(duplicate_id, "password") {
-    Err(Error::DuplicateId(id)) => assert_eq!(duplicate_id, id),
+  let uid = initial_identity();
+
+  manager.add_password(&uid, "password").unwrap();
+  match manager.add_password(&uid, "password") {
+    Err(Error::DuplicateId(id)) => assert_eq!(&uid, &id),
     _ => panic!("Expected DuplicateId error"),
   }
 }
@@ -108,15 +126,19 @@ fn test_duplicate_password_addition() {
 #[test]
 fn test_add_empty_password() {
   let (manager, _temp_file) = setup_db();
-  let result = manager.add_password("empty_password_id", "");
+  let uid = initial_identity();
+
+  let result = manager.add_password(&uid, "");
   assert!(result.is_err());
 }
 
 #[test]
 fn test_update_to_empty_password() {
   let (manager, _temp_file) = setup_db();
-  manager.add_password("test_id", "test_password").unwrap();
-  let result = manager.update_password("test_id", "");
+  let uid = initial_identity();
+
+  manager.add_password(&uid, "test_password").unwrap();
+  let result = manager.update_password(&uid, "");
   assert!(result.is_err());
 }
 
@@ -160,27 +182,39 @@ fn test_database_file_opening_failure() {
 #[test]
 fn test_list_passwords() {
   let (manager, _temp_file) = setup_db();
-  manager.add_password("test_id1", "test_password").unwrap();
-  manager.add_password("test_id2", "test_password").unwrap();
+
+  let id1 = UserIdentity {
+    service: "test_service_1".to_string(),
+    username: Some("test_username_1".to_string()),
+  };
+  let id2 = UserIdentity {
+    service: "test_service_2".to_string(),
+    username: Some("test_username_2".to_string()),
+  };
+
+  manager.add_password(&id1, "test_password").unwrap();
+  manager.add_password(&id2, "test_password").unwrap();
 
   let ids = manager.list_passwords().unwrap();
-  assert_eq!(ids, vec!["test_id1", "test_id2"]);
+  assert_eq!(ids, vec![id1, id2]);
 }
 
 #[test]
 fn test_add_update_long_password() {
   let (manager, _temp_file) = setup_db();
+  let uid = initial_identity();
+
   let long_password = "p@ssw0Rd".repeat(100);
 
-  manager.add_password("long_id", &long_password).unwrap();
-  let retrieved_password = manager.get_password("long_id").unwrap();
+  manager.add_password(&uid, &long_password).unwrap();
+  let retrieved_password = manager.get_password(&uid).unwrap();
   assert_eq!(retrieved_password, Some(long_password.clone()));
 
   let updated_long_password = "q".repeat(10_000);
   manager
-    .update_password("long_id", &updated_long_password)
+    .update_password(&uid, &updated_long_password)
     .unwrap();
-  let updated_retrieved_password = manager.get_password("long_id").unwrap();
+  let updated_retrieved_password = manager.get_password(&uid).unwrap();
   assert_eq!(updated_retrieved_password, Some(updated_long_password));
 }
 
@@ -239,7 +273,9 @@ fn test_cipher_decrypt_on_invalid_encryption() {
 #[test]
 fn test_update_master_password() {
   let (mut manager, _temp_file) = setup_db();
-  manager.add_password("test_id", "test_password").unwrap();
+  let uid = initial_identity();
+
+  manager.add_password(&uid, "test_password").unwrap();
 
   let new_master_password = "new_master_password";
   manager.update_master_password(new_master_password).unwrap();
@@ -260,13 +296,18 @@ fn test_update_master_password() {
 
   // Verify encryption/decryption
   assert_eq!(
-    manager.get_password("test_id").unwrap(),
+    manager.get_password(&uid).unwrap(),
     Some("test_password".to_string())
   );
 
-  manager.add_password("new_id", "new_password").unwrap();
+  let new_uid = UserIdentity {
+    service: "new_service".to_string(),
+    username: Some("new_username".to_string()),
+  };
+
+  manager.add_password(&new_uid, "new_password").unwrap();
   assert_eq!(
-    manager.get_password("new_id").unwrap(),
+    manager.get_password(&new_uid).unwrap(),
     Some("new_password".to_string())
   );
 }
@@ -383,33 +424,35 @@ fn test_created_at_and_updated_at() {
       cast(strftime('%s', created_at) as integer),
       cast(strftime('%s', updated_at) as integer)
     FROM passwords
-    WHERE id = ?
+    WHERE service = ?1 AND username = ?2
   ";
-  let get_times = |id: &str| {
+  let get_times = |uid: &UserIdentity| {
     manager
       .conn
-      .query_row(QUERY, rusqlite::params![id], |row| {
-        Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
-      })
+      .query_row(
+        QUERY,
+        rusqlite::params![&uid.service, uid.username.as_deref()],
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+      )
       .unwrap()
   };
 
-  let id = "test_id";
+  let uid = initial_identity();
   let password = "test_password";
-  manager.add_password(id, password).unwrap();
+  manager.add_password(&uid, password).unwrap();
 
   // Check timestamps on creation
-  let times_0 = get_times(id);
+  let times_0 = get_times(&uid);
   assert_eq!(times_0.0, times_0.1);
 
   std::thread::sleep(std::time::Duration::from_secs(2));
 
   // Update the password
   let new_password = "new_password";
-  manager.update_password(id, new_password).unwrap();
+  manager.update_password(&uid, new_password).unwrap();
 
   // Check timestamps on update
-  let times_1 = get_times(id);
+  let times_1 = get_times(&uid);
   assert!(
     times_1.1 > times_1.0,
     "updated_at should not be earlier than created_at"

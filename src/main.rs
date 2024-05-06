@@ -11,7 +11,7 @@ use dialoguer::{theme::ColorfulTheme, Confirm, Input, Password, Select};
 use pwdg::{PwdGen, PwdGenOptions};
 use pwdm::{
   Error::{IncorrectMasterPassword, WeakPassword},
-  PwdManager,
+  PwdManager, UserIdentity,
 };
 use std::path::{Path, PathBuf};
 
@@ -164,16 +164,55 @@ fn select_action() -> Result<Action> {
   Ok(SELECTIONS[selection])
 }
 
+fn get_identity() -> Result<UserAction<UserIdentity>> {
+  let service: String = Input::new()
+    .with_prompt(format!("Enter {} ('b' to go back)", "Service".cyan()))
+    .interact_text()?;
+  if service == "b" {
+    return Ok(UserAction::Back);
+  }
+
+  let username: String = Input::new()
+    .with_prompt(format!(
+      "Enter {} (or press Enter for None, 'b' to go back)",
+      "Username".cyan()
+    ))
+    .allow_empty(true)
+    .interact_text()?;
+  if username == "b" {
+    return Ok(UserAction::Back);
+  }
+
+  let uid = UserIdentity {
+    service,
+    username: if username.is_empty() {
+      None
+    } else {
+      Some(username)
+    },
+  };
+  Ok(UserAction::ContinueWithMessage(uid))
+}
+
 fn match_action(
   selection: Action,
   pwdgen: &PwdGen,
   pwd_manager: &mut PwdManager,
 ) -> Result<UserAction<String>> {
   match selection {
-    Action::Add => add_password(pwd_manager, pwdgen),
-    Action::Get => get_password(pwd_manager),
-    Action::Delete => delete_password(pwd_manager),
-    Action::Update => update_password(pwd_manager, pwdgen),
+    Action::Add | Action::Get | Action::Delete | Action::Update => {
+      match get_identity()? {
+        UserAction::Back => Ok(UserAction::Back),
+        UserAction::ContinueWithMessage(uid) => match selection {
+          Action::Add => add_password(pwd_manager, pwdgen, &uid),
+          Action::Get => get_password(pwd_manager, &uid),
+          Action::Delete => delete_password(pwd_manager, &uid),
+          Action::Update => update_password(pwd_manager, pwdgen, &uid),
+          _ => unreachable!(),
+        },
+        _ => unreachable!(),
+      }
+    }
     Action::List => {
       list_passwords(pwd_manager)?;
       Ok(UserAction::Continue)
@@ -211,88 +250,99 @@ where
 fn add_password(
   pwd_manager: &PwdManager,
   pwdgen: &PwdGen,
+  uid: &UserIdentity,
 ) -> Result<UserAction<String>> {
-  do_action(
-    "Enter ID",
-    |id| {
-      if pwd_manager.get_password(id)?.is_none() {
-        let password: String = generate_password(pwdgen, "Enter password")?;
-        pwd_manager.add_password(id, &password)?;
-        println!("Password added.");
-      } else {
-        println!("{}", "Password exists.".red());
-      }
-      Ok(())
-    },
-    false,
-  )
+  if pwd_manager.get_password(uid)?.is_none() {
+    let password: String = generate_password(pwdgen, "Enter password")?;
+    pwd_manager.add_password(uid, &password)?;
+    Ok(UserAction::ContinueWithMessage("Password added.".into()))
+  } else {
+    println!("{}", "Password exists.".red());
+    Ok(UserAction::Continue)
+  }
 }
 
-fn get_password(pwd_manager: &PwdManager) -> Result<UserAction<String>> {
-  do_action(
-    "Enter ID",
-    |id| {
-      match pwd_manager.get_password(id)? {
-        Some(password) => println!("Password: {}", password),
-        None => print_no_password_found_for_id(id),
-      }
-      Ok(())
-    },
-    false,
-  )
+fn get_password(
+  pwd_manager: &PwdManager,
+  uid: &UserIdentity,
+) -> Result<UserAction<String>> {
+  match pwd_manager.get_password(uid)? {
+    Some(password) => Ok(UserAction::ContinueWithMessage(format!(
+      "{}: {}",
+      "Password".cyan(),
+      password
+    ))),
+    None => {
+      print_no_password_found_for_id(uid);
+      Ok(UserAction::Continue)
+    }
+  }
 }
 
-fn delete_password(pwd_manager: &PwdManager) -> Result<UserAction<String>> {
-  do_action(
-    "Enter ID",
-    |id| {
-      if pwd_manager.get_password(id)?.is_none() {
-        print_no_password_found_for_id(id);
-      } else if Confirm::new()
-        .with_prompt(format!(
-          "Are you sure you want to delete password for ID {}",
-          id
-        ))
-        .interact()?
-      {
-        pwd_manager.delete_password(id)?;
-        println!("Password deleted.");
-      }
-      Ok(())
-    },
-    false,
-  )
+fn delete_password(
+  pwd_manager: &PwdManager,
+  uid: &UserIdentity,
+) -> Result<UserAction<String>> {
+  if pwd_manager.get_password(uid)?.is_none() {
+    print_no_password_found_for_id(uid);
+    return Ok(UserAction::Continue);
+  } else if Confirm::new()
+    .with_prompt(format!(
+      "Are you sure you want to delete the password for {}",
+      uid
+    ))
+    .interact()?
+  {
+    pwd_manager.delete_password(uid)?;
+    return Ok(UserAction::ContinueWithMessage("Password deleted.".into()));
+  }
+  Ok(UserAction::Continue)
 }
 
 fn update_password(
   pwd_manager: &PwdManager,
   pwdgen: &PwdGen,
+  uid: &UserIdentity,
 ) -> Result<UserAction<String>> {
-  do_action(
-    "Enter ID",
-    |id| {
-      if pwd_manager.get_password(id)?.is_none() {
-        print_no_password_found_for_id(id);
-      } else {
-        let new_password: String =
-          generate_password(pwdgen, "Enter new password")?;
-        pwd_manager.update_password(id, &new_password)?;
-        println!("Password updated.");
-      }
-      Ok(())
-    },
-    false,
-  )
+  if pwd_manager.get_password(uid)?.is_none() {
+    print_no_password_found_for_id(uid);
+    return Ok(UserAction::Continue);
+  }
+  let new_password: String = generate_password(pwdgen, "Enter new password")?;
+  pwd_manager.update_password(uid, &new_password)?;
+  Ok(UserAction::ContinueWithMessage("Password updated.".into()))
 }
 
 fn list_passwords(pwd_manager: &PwdManager) -> Result<()> {
-  let ids = pwd_manager.list_passwords()?;
-  if ids.is_empty() {
+  let uids = pwd_manager.list_passwords()?;
+  if uids.is_empty() {
     println!("No passwords stored.");
   } else {
-    println!("Stored passwords:");
-    for id in ids {
-      println!("- {}", id);
+    let max_service_len =
+      uids.iter().map(|uid| uid.service.len()).max().unwrap_or(0);
+    let max_username_len = uids
+      .iter()
+      .filter_map(|uid| uid.username.as_ref().map(String::len))
+      .max()
+      .unwrap_or(0);
+    println!(
+      "\n{0:<pad$} | {1}",
+      "Service".cyan(),
+      "Username".cyan(),
+      pad = max_service_len
+    );
+    println!(
+      "{:=<pad$}",
+      "",
+      pad = max_service_len + max_username_len + 3
+    );
+    for uid in uids {
+      println!(
+        "{0:<pad$} | {1:}",
+        uid.service,
+        uid.username.as_deref().unwrap_or(""),
+        pad = max_service_len
+      );
     }
   }
   Ok(())
@@ -464,8 +514,8 @@ fn print_header(path: &str) {
   );
 }
 
-fn print_no_password_found_for_id(id: &str) {
-  println!("No password found for ID: {}", id.to_string().cyan())
+fn print_no_password_found_for_id(uid: &UserIdentity) {
+  println!("No password found for {}", uid)
 }
 
 fn print_if_password_confirmation_fails() {
