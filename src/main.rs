@@ -318,8 +318,12 @@ fn list_passwords(pwd_manager: &PwdManager) -> Result<()> {
   if uids.is_empty() {
     println!("No passwords stored.");
   } else {
-    let max_service_len =
-      uids.iter().map(|uid| uid.service.len()).max().unwrap_or(0);
+    let max_service_len = uids
+      .iter()
+      .map(|uid| uid.service.len())
+      .max()
+      .unwrap_or(0)
+      .max("Service".len());
     let max_username_len = uids
       .iter()
       .filter_map(|uid| uid.username.as_ref().map(String::len))
@@ -327,6 +331,7 @@ fn list_passwords(pwd_manager: &PwdManager) -> Result<()> {
       .unwrap_or(0);
     let separator_len = " | ".len();
     let header_len = max_service_len + separator_len + "Username".len();
+
     println!(
       "\n{0:<pad$} | {1}",
       "Service".cyan(),
