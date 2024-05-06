@@ -325,6 +325,8 @@ fn list_passwords(pwd_manager: &PwdManager) -> Result<()> {
       .filter_map(|uid| uid.username.as_ref().map(String::len))
       .max()
       .unwrap_or(0);
+    let separator_len = " | ".len();
+    let header_len = max_service_len + separator_len + "Username".len();
     println!(
       "\n{0:<pad$} | {1}",
       "Service".cyan(),
@@ -334,7 +336,10 @@ fn list_passwords(pwd_manager: &PwdManager) -> Result<()> {
     println!(
       "{:=<pad$}",
       "",
-      pad = max_service_len + max_username_len + 3
+      pad = std::cmp::max(
+        max_service_len + max_username_len + separator_len,
+        header_len
+      )
     );
     for uid in uids {
       println!(
