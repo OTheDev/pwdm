@@ -17,20 +17,15 @@ use argon2::{
   },
   Argon2,
 };
+use chrono::{DateTime, Utc};
 use error::{Error, Result};
 use rusqlite::{params, Connection, OpenFlags, Transaction};
 use zxcvbn::zxcvbn;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UserIdentity {
   pub service: String,
   pub username: Option<String>,
-}
-
-impl PartialEq for UserIdentity {
-  fn eq(&self, other: &Self) -> bool {
-    self.service == other.service && self.username == other.username
-  }
 }
 
 impl std::fmt::Display for UserIdentity {
@@ -42,6 +37,14 @@ impl std::fmt::Display for UserIdentity {
       None => write!(f, "Service: {}", self.service),
     }
   }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Entry {
+  pub uid: UserIdentity,
+  pub created_at: DateTime<Utc>,
+  pub updated_at: DateTime<Utc>,
+  pub password: String,
 }
 
 /// Password manager struct.
@@ -302,10 +305,10 @@ impl PwdManager {
   }
 
   /// Retrieves a password by its ID.
-  pub fn get_password(&self, uid: &UserIdentity) -> Result<Option<String>> {
+  pub fn get_password(&self, uid: &UserIdentity) -> Result<Option<Entry>> {
     let mut stmt = self.conn.prepare(
       "
-        SELECT ciphertext, nonce FROM passwords
+        SELECT ciphertext, nonce, created_at, updated_at FROM passwords
         WHERE service = ?1 AND username IS ?2
       ",
     )?;
@@ -316,10 +319,19 @@ impl PwdManager {
     if let Some(row) = rows.next()? {
       let ciphertext: Vec<u8> = row.get(0)?;
       let nonce: Vec<u8> = row.get(1)?;
+      let created_at: DateTime<Utc> = row.get(2)?;
+      let updated_at: DateTime<Utc> = row.get(3)?;
 
       let decrypted_plaintext = self.cipher.decrypt(&ciphertext, &nonce)?;
 
-      Ok(Some(String::from_utf8(decrypted_plaintext)?))
+      let entry = Entry {
+        uid: uid.clone(),
+        created_at,
+        updated_at,
+        password: String::from_utf8(decrypted_plaintext)?,
+      };
+
+      Ok(Some(entry))
     } else {
       Ok(None)
     }

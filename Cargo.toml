@@ -13,13 +13,14 @@ categories = ["command-line-utilities", "cryptography", "database-implementation
 [dependencies]
 aes-gcm = "0.10.3"
 argon2 = "0.5.3"
+chrono = "0.4"
 clap = { version = "4.5", features = ["derive"] }
 clearscreen = "3"
 colored = "2.1.0"
 dialoguer = "0.11"
 dirs = "5.0"
 pwdg = "0.1"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.31", features = ["bundled", "chrono"] }
 thiserror = "1.0"
 zxcvbn = "2.2"
 

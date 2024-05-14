@@ -41,7 +41,10 @@ fn test_add_and_get_password() {
 
   manager.add_password(&uid, "test_password").unwrap();
   let retrieved_password = manager.get_password(&uid).unwrap();
-  assert_eq!(retrieved_password, Some("test_password".to_string()));
+  assert_eq!(
+    retrieved_password.unwrap().password,
+    "test_password".to_string()
+  );
 }
 
 #[test]
@@ -52,7 +55,10 @@ fn test_update_password() {
   manager.add_password(&uid, "test_password").unwrap();
   manager.update_password(&uid, "new_password").unwrap();
   let retrieved_password = manager.get_password(&uid).unwrap();
-  assert_eq!(retrieved_password, Some("new_password".to_string()));
+  assert_eq!(
+    retrieved_password.unwrap().password,
+    "new_password".to_string()
+  );
 }
 
 #[test]
@@ -94,7 +100,10 @@ fn test_long_password() {
   let long_password = "p".repeat(1000);
 
   manager.add_password(&uid, &long_password).unwrap();
-  assert_eq!(manager.get_password(&uid).unwrap(), Some(long_password));
+  assert_eq!(
+    manager.get_password(&uid).unwrap().unwrap().password,
+    long_password
+  );
 }
 
 #[test]
@@ -106,8 +115,8 @@ fn test_special_character_password() {
 
   manager.add_password(&uid, special_password).unwrap();
   assert_eq!(
-    manager.get_password(&uid).unwrap(),
-    Some(special_password.to_string())
+    manager.get_password(&uid).unwrap().unwrap().password,
+    special_password.to_string()
   );
 }
 
@@ -208,14 +217,17 @@ fn test_add_update_long_password() {
 
   manager.add_password(&uid, &long_password).unwrap();
   let retrieved_password = manager.get_password(&uid).unwrap();
-  assert_eq!(retrieved_password, Some(long_password.clone()));
+  assert_eq!(retrieved_password.unwrap().password, long_password.clone());
 
   let updated_long_password = "q".repeat(10_000);
   manager
     .update_password(&uid, &updated_long_password)
     .unwrap();
   let updated_retrieved_password = manager.get_password(&uid).unwrap();
-  assert_eq!(updated_retrieved_password, Some(updated_long_password));
+  assert_eq!(
+    updated_retrieved_password.unwrap().password,
+    updated_long_password
+  );
 }
 
 #[test]
@@ -296,8 +308,8 @@ fn test_update_master_password() {
 
   // Verify encryption/decryption
   assert_eq!(
-    manager.get_password(&uid).unwrap(),
-    Some("test_password".to_string())
+    manager.get_password(&uid).unwrap().unwrap().password,
+    "test_password".to_string()
   );
 
   let new_uid = UserIdentity {
@@ -307,8 +319,8 @@ fn test_update_master_password() {
 
   manager.add_password(&new_uid, "new_password").unwrap();
   assert_eq!(
-    manager.get_password(&new_uid).unwrap(),
-    Some("new_password".to_string())
+    manager.get_password(&new_uid).unwrap().unwrap().password,
+    "new_password".to_string()
   );
 }
 

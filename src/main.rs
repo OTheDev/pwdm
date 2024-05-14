@@ -267,10 +267,10 @@ fn get_password(
   uid: &UserIdentity,
 ) -> Result<UserAction<String>> {
   match pwd_manager.get_password(uid)? {
-    Some(password) => Ok(UserAction::ContinueWithMessage(format!(
+    Some(entry) => Ok(UserAction::ContinueWithMessage(format!(
       "{}: {}",
       "Password".cyan(),
-      password
+      entry.password
     ))),
     None => {
       print_no_password_found_for_id(uid);
