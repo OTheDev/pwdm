@@ -15,6 +15,7 @@ on:
       - 'tests/**'
       - 'Cargo.toml'
       - '.github/workflows/static.yml'
+  workflow_dispatch:
 
 jobs:
   lint-and-audit:
